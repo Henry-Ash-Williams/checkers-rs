@@ -2,7 +2,7 @@ use clearscreen::clear;
 use regex::Regex;
 use std::io::stdin;
 
-use anyhow::{anyhow, Result, Error, Context};
+use anyhow::{anyhow, Context, Error, Result};
 
 use crate::{board::*, player::*, tile::*};
 
@@ -21,19 +21,26 @@ impl Game {
 
     pub fn run(&mut self) -> Result<Player> {
         loop {
-            match (self.board.get_remaining_peices(Player::Black), self.board.get_remaining_peices(Player::White)) {
-                (0, _) => { return Ok(Player::Black); },
-                (_, 0) => { return Ok(Player::White); },
+            match (
+                self.board.get_remaining_peices(Player::Black),
+                self.board.get_remaining_peices(Player::White),
+            ) {
+                (0, _) => {
+                    return Ok(Player::Black);
+                }
+                (_, 0) => {
+                    return Ok(Player::White);
+                }
                 (_, _) => (),
             };
-            
+
             clear()?;
             println!("{}", self.board);
             self.get_stats();
             let (from, to) = loop {
                 let this_move = self.get_move();
-                if this_move.is_ok() {
-                    break this_move.unwrap();
+                if let Ok(m) = this_move {
+                    break m;
                 } else {
                     println!("{this_move:?}");
                 }
@@ -51,7 +58,11 @@ impl Game {
         println!("Move No #{}", self.move_id + 1);
         println!("Remaining Peices:");
         println!("Black\tWhite");
-        println!("{}\t{}", self.board.get_remaining_peices(Player::Black), self.board.get_remaining_peices(Player::White));
+        println!(
+            "{}\t{}",
+            self.board.get_remaining_peices(Player::Black),
+            self.board.get_remaining_peices(Player::White)
+        );
     }
 
     pub fn get_idx(x: char, y: usize) -> Result<usize> {
@@ -125,7 +136,7 @@ impl Game {
     }
 
     #[allow(clippy::clone_on_copy)]
-    // Lint disabled here as we need to make a deep copy to prevent the game 
+    // Lint disabled here as we need to make a deep copy to prevent the game
     // from actually making the move
     fn is_valid_move(&self, from: usize, to: usize) -> bool {
         let mut board_cpy = self.board.clone();

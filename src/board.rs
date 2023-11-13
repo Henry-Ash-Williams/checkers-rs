@@ -1,7 +1,7 @@
 #![allow(clippy::needless_range_loop, unused_variables)]
 
-use std::{fmt, ops::Range};
 use std::cmp::{max, min};
+use std::{fmt, ops::Range};
 
 use anyhow::{anyhow, Result};
 
@@ -87,7 +87,9 @@ impl Board {
         to: usize,
     ) -> Result<()> {
         if from == to {
-            return Err(anyhow!("Cannot move to the same position as where the peice started"));
+            return Err(anyhow!(
+                "Cannot move to the same position as where the peice started"
+            ));
         }
 
         let delta = Self::delta(from, to);
@@ -95,28 +97,26 @@ impl Board {
         // Verify peice is moving diagonally
         let (dx, dy) = delta;
 
-
         if dx.abs() != dy.abs() {
             return Err(anyhow!("Peice must move diagonally"));
         }
-        
 
         // Make sure the peice is able to move, i.e. is not blocked by any
         // friendly peices, and capture any enemy peices in its way
-        
+
         let from_coords = Self::idx_to_coords(from);
         let to_coords = Self::idx_to_coords(to);
 
         let (sx, sy) = from_coords;
         let (tx, ty) = to_coords;
 
-        // Generate a list of indicies the king must move over to get to the target 
-        let moves: Vec<usize> = (min(sx, tx) .. max(sx, tx))
-            .zip(min(sy, ty) .. max(sy, ty))
+        // Generate a list of indicies the king must move over to get to the target
+        let moves: Vec<usize> = (min(sx, tx)..max(sx, tx))
+            .zip(min(sy, ty)..max(sy, ty))
             .map(|(x, y)| Self::coords_to_idx(x, y))
             .collect();
 
-        // Check the move is not blocked by any friendly peices, make sure to ignore the moving tile 
+        // Check the move is not blocked by any friendly peices, make sure to ignore the moving tile
         let move_contains_friendly_peices = moves
             .iter()
             .any(|idx| self.board[*idx].occupied_by == Some(moving_player) && *idx != from);
@@ -132,11 +132,9 @@ impl Board {
             .copied()
             .collect();
 
-
         for idx in captured_peices {
             self.board[idx].leave()
         }
-        
 
         self.board[from].leave();
         self.board[from].demote();
@@ -161,7 +159,9 @@ impl Board {
     }
 
     pub fn has_king(&self, player: Player) -> bool {
-        self.board.iter().any(|tile| tile.kind() == TileKind::King && tile.occupied_by == Some(player))
+        self.board
+            .iter()
+            .any(|tile| tile.kind() == TileKind::King && tile.occupied_by == Some(player))
     }
 
     /// Make a move
@@ -179,137 +179,78 @@ impl Board {
             return Err(anyhow!("Cannot move to the same position"));
         }
 
-        if turn_id % 2 == 0 {
-            // Black moving
+        // check they're not trying to move a white piece
+        let moving_player = if turn_id % 2 == 0 {
+            Player::Black
+        } else {
+            Player::White
+        };
+        if !moving_player == self.board[from].get_owner()? {
+            return Err(anyhow!("Cannot move the other players piece!"));
+        }
 
-            // check they're not trying to move a white piece
-            if let Player::White = self.board[from].get_owner()? {
-                return Err(anyhow!("Cannot move the other players piece!"));
+        // Check that normal tiles only move +1 tile diagonally forward
+        if let TileKind::Normal = self.board[from].kind() {
+            let (dx, dy) = delta;
+
+            // Check that the peice is moving diagonally
+            if dx.abs() != dy.abs() {
+                return Err(anyhow!(
+                    "Normal peices cannot move more than one tile diagonally"
+                ));
             }
 
-            // Check that normal tiles only move +1 tile diagonally forward
-            if let TileKind::Normal = self.board[from].kind() {
-                let (dx, dy) = delta;
-
-                // Check that the peice is moving diagonally
-                if dx.abs() != dy.abs() {
-                    return Err(anyhow!(
-                        "Normal peices cannot move more than one tile diagonally"
-                    ));
-                }
-
-                // Check that the peice is only moving one tile
-                if dx.abs() > 1 {
-                    return Err(anyhow!("Normal peices can only move one tile diagonally"));
-                }
-
-                // Check that the peice is moving forwards
-                if dy == -1 {
-                    return Err(anyhow!("Normal peices cannot move backwards"));
-                }
-            } else {
-                return self.handle_king_movement(Player::Black, from, to);
+            // Check that the peice is only moving one tile
+            if dx.abs() > 1 {
+                return Err(anyhow!("Normal peices can only move one tile diagonally"));
             }
 
-            // Check if target tile is occupied
-            if !self.board[to].is_empty() {
-                if let Player::White = self.board[to].get_owner()? {
-                    // Handle taking an opponents peice by jumping over it
-                    let to_coords = Self::idx_to_coords(to);
-                    let next_tile = (
-                        (to_coords.0 as isize + delta.0) as usize,
-                        (to_coords.1 as isize + delta.1) as usize,
-                    );
-
-                    if self.board[Self::coords_to_idx(next_tile.0, next_tile.1)].is_empty() {
-                        self.board[from].leave();
-                        self.board[to].leave();
-                        self.board[Self::coords_to_idx(next_tile.0, next_tile.1)]
-                            .take_ownership(Player::Black);
-                        Ok(())
-                    } else {
-                        Err(anyhow!("Next tile is already occupied!"))
-                    }
-                } else {
-                    Err(anyhow!("You already occupy this tile!"))
-                }
-            } else {
-                // Simple move without capturing an enemy peice
-                self.board[from].leave();
-                self.board[to].take_ownership(Player::Black);
-
-                // Check if the peice needs to be promoted
-                if Self::idx_to_coords(to).1 == BOARD_SIZE - 1 {
-                    self.board[to].promote();
-                }
-                Ok(())
+            // Check that the peice is moving forwards
+            if dy == if let Player::Black = moving_player { -1 } else { 1 } {
+                return Err(anyhow!("Normal peices cannot move backwards"));
             }
         } else {
-            // White moving
+            return self.handle_king_movement(moving_player, from, to);
+        }
 
-            // check they're not trying to move a black piece
-            if let Player::Black = self.board[from].get_owner()? {
-                return Err(anyhow!("Cannot move the other players piece!"));
-            }
+        // Check if target tile is occupied
+        if !self.board[to].is_empty() {
+            if !moving_player == self.board[to].get_owner()? {
+                // Handle taking an opponents peice by jumping over it
+                let to_coords = Self::idx_to_coords(to);
+                let next_tile = (
+                    (to_coords.0 as isize + delta.0) as usize,
+                    (to_coords.1 as isize + delta.1) as usize,
+                );
 
-            // Check that normal tiles only move +1 tile diagonally forward
-            if let TileKind::Normal = self.board[from].kind() {
-                let (dx, dy) = delta;
-
-                // Check that the peice is moving diagonally
-                if dx.abs() != dy.abs() {
-                    return Err(anyhow!(
-                        "Normal peices cannot move more than one tile diagonally"
-                    ));
-                }
-
-                // Check that the peice is only moving one tile
-                if dx.abs() > 1 {
-                    return Err(anyhow!(
-                        "Normal peices cannot move more than one tile diagonally"
-                    ));
-                }
-
-                // Check that the peice is moving forwards
-                if dy == 1 {
-                    return Err(anyhow!("Normal peices cannot move backwards"));
-                }
-            } else {
-                return self.handle_king_movement(Player::White, from, to);
-            }
-
-            if !self.board[to].is_empty() {
-                if let Player::Black = self.board[to].get_owner()? {
-                    // Handle taking an opponents peice by jumping over it
-                    let to_coords = Self::idx_to_coords(to);
-                    let next_tile = (
-                        (to_coords.0 as isize + delta.0) as usize,
-                        (to_coords.1 as isize + delta.1) as usize,
-                    );
-
-                    if self.board[Self::coords_to_idx(next_tile.0, next_tile.1)].is_empty() {
-                        self.board[from].leave();
-                        self.board[to].leave();
-                        self.board[Self::coords_to_idx(next_tile.0, next_tile.1)]
-                            .take_ownership(Player::White);
-                        Ok(())
-                    } else {
-                        Err(anyhow!("Next tile is already occupied!"))
-                    }
+                if self.board[Self::coords_to_idx(next_tile.0, next_tile.1)].is_empty() {
+                    self.board[from].leave();
+                    self.board[to].leave();
+                    self.board[Self::coords_to_idx(next_tile.0, next_tile.1)]
+                        .take_ownership(moving_player);
+                    Ok(())
                 } else {
-                    Err(anyhow!("You already occupy this tile!"))
+                    Err(anyhow!("Next tile is already occupied!"))
                 }
             } else {
-                self.board[from].leave();
-                self.board[to].take_ownership(Player::White);
-
-                // Check if the peice needs to be promoted
-                if Self::idx_to_coords(to).1 == 0 {
-                    self.board[to].promote();
-                }
-
-                Ok(())
+                Err(anyhow!("You already occupy this tile!"))
             }
+        } else {
+            // Simple move without capturing an enemy peice
+            self.board[from].leave();
+            self.board[to].take_ownership(moving_player);
+
+            // Check if the peice needs to be promoted
+            if Self::idx_to_coords(to).1
+                == if let Player::Black = moving_player {
+                    BOARD_SIZE - 1
+                } else {
+                    0
+                }
+            {
+                self.board[to].promote();
+            }
+            Ok(())
         }
     }
 }
@@ -649,73 +590,104 @@ mod test {
     fn test_movement() {
         let mut board = Board::new();
 
-        // Check we cannot move to the same location as we started 
+        // Check we cannot move to the same location as we started
         assert!(board.make_move(0, 20, 20).is_err());
 
         // Move e3 to f4
         assert!(board.make_move(0, 20, 29).is_ok());
 
-
-        // Verify that board updates accordingly 
+        // Verify that board updates accordingly
         assert_eq!(
             board.board()[29],
-            Tile { occupied_by: Some(Player::Black), kind: TileKind::Normal} 
+            Tile {
+                occupied_by: Some(Player::Black),
+                kind: TileKind::Normal
+            }
         );
         assert_eq!(
             board.board()[20],
-            Tile { occupied_by: None, kind: TileKind::Normal} 
+            Tile {
+                occupied_by: None,
+                kind: TileKind::Normal
+            }
         );
 
         assert!(board.make_move(1, 43, 36).is_ok());
 
-        // Verify that board updates accordingly 
+        // Verify that board updates accordingly
         assert_eq!(
             board.board()[36],
-            Tile { occupied_by: Some(Player::White), kind: TileKind::Normal},
+            Tile {
+                occupied_by: Some(Player::White),
+                kind: TileKind::Normal
+            },
         );
         assert_eq!(
             board.board()[43],
-            Tile { occupied_by: None, kind: TileKind::Normal},
+            Tile {
+                occupied_by: None,
+                kind: TileKind::Normal
+            },
         );
 
         assert_eq!(
             board.board()[36],
-            Tile { occupied_by: Some(Player::White), kind: TileKind::Normal}
+            Tile {
+                occupied_by: Some(Player::White),
+                kind: TileKind::Normal
+            }
         );
 
         assert!(board.make_move(0, 29, 36).is_ok());
 
-        // Verify that capturing works as expected 
+        // Verify that capturing works as expected
         assert_eq!(
             board.board()[29],
-            Tile { occupied_by: None, kind: TileKind::Normal}
+            Tile {
+                occupied_by: None,
+                kind: TileKind::Normal
+            }
         );
         assert_eq!(
             board.board()[36],
-            Tile { occupied_by: None, kind: TileKind::Normal}
+            Tile {
+                occupied_by: None,
+                kind: TileKind::Normal
+            }
         );
 
         assert_eq!(
             board.board()[43],
-            Tile { occupied_by: Some(Player::Black), kind: TileKind::Normal}
+            Tile {
+                occupied_by: Some(Player::Black),
+                kind: TileKind::Normal
+            }
         );
 
         assert!(board.make_move(1, 52, 43).is_ok());
 
-
         assert_eq!(
             board.board()[43],
-            Tile { occupied_by: None, kind: TileKind::Normal}
+            Tile {
+                occupied_by: None,
+                kind: TileKind::Normal
+            }
         );
 
         assert_eq!(
             board.board()[52],
-            Tile { occupied_by: None, kind: TileKind::Normal }
+            Tile {
+                occupied_by: None,
+                kind: TileKind::Normal
+            }
         );
-        
+
         assert_eq!(
             board.board()[34],
-            Tile { occupied_by: Some(Player::White), kind: TileKind::Normal }
+            Tile {
+                occupied_by: Some(Player::White),
+                kind: TileKind::Normal
+            }
         );
 
         assert!(board.make_move(0, 18, 10).is_err());
@@ -768,23 +740,41 @@ mod test {
         assert!(board.make_move(0, 42, 14).is_ok());
         assert!(board.make_move(0, 42, 42).is_err());
 
-
-        assert_eq!(board.board[14], Tile {occupied_by: Some(Player::Black), kind: TileKind::King});
-        assert_eq!(board.board[28], Tile {occupied_by: None, kind: TileKind::Normal});
-
+        assert_eq!(
+            board.board[14],
+            Tile {
+                occupied_by: Some(Player::Black),
+                kind: TileKind::King
+            }
+        );
+        assert_eq!(
+            board.board[28],
+            Tile {
+                occupied_by: None,
+                kind: TileKind::Normal
+            }
+        );
 
         board.board[14].leave();
-        board.board[35] = Tile { occupied_by: Some(Player::Black), kind: TileKind::King };
+        board.board[35] = Tile {
+            occupied_by: Some(Player::Black),
+            kind: TileKind::King,
+        };
         board.board[17].take_ownership(Player::White);
 
         assert!(board.make_move(0, 35, 17).is_ok());
-        assert_eq!(board.board[17], Tile { occupied_by: Some(Player::Black), kind: TileKind::King });
+        assert_eq!(
+            board.board[17],
+            Tile {
+                occupied_by: Some(Player::Black),
+                kind: TileKind::King
+            }
+        );
 
         board.board[44].take_ownership(Player::White);
         board.board[53].take_ownership(Player::White);
 
         assert!(board.make_move(0, 17, 62).is_ok());
 
-        println!("{board}");
     }
 }

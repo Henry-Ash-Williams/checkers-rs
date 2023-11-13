@@ -5,7 +5,10 @@ use anyhow::{anyhow, Result};
 use board::{Board, BOARD_SIZE};
 use game::Game;
 
-use crate::{player::Player, tile::{Tile, TileKind}};
+use crate::{
+    player::Player,
+    tile::{Tile, TileKind},
+};
 
 mod board;
 mod game;
@@ -21,10 +24,9 @@ fn stats(b: Board) {
 }
 
 fn main() -> Result<()> {
-    let mut game = Game::new(); 
+    let mut game = Game::new();
 
     let winner = game.run()?;
     println!("WINNER: {:?}", winner);
-    Ok(()) 
-
+    Ok(())
 }

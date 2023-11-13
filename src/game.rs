@@ -1,3 +1,4 @@
+use clearscreen::clear;
 use regex::Regex;
 use std::io::stdin;
 
@@ -26,7 +27,7 @@ impl Game {
                 (_, _) => (),
             };
             
-            // TODO: Clear terminal 
+            clear()?;
             println!("{}", self.board);
             self.get_stats();
             let (from, to) = loop {

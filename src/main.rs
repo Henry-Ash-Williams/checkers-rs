@@ -2,7 +2,10 @@
 
 use anyhow::{anyhow, Result};
 
+use std::mem::size_of;
+
 use board::{Board, BOARD_SIZE};
+use clearscreen::clear;
 use game::Game;
 
 use crate::{
@@ -15,17 +18,9 @@ mod game;
 mod player;
 mod tile;
 
-fn stats(b: Board) {
-    println!(
-        "Remaining peices: \nBlack\tWhite\n{}\t{}",
-        b.get_remaining_peices(Player::Black),
-        b.get_remaining_peices(Player::White)
-    );
-}
-
 fn main() -> Result<()> {
+    clear()?;
     let mut game = Game::new();
-
     let winner = game.run()?;
     println!("WINNER: {:?}", winner);
     Ok(())

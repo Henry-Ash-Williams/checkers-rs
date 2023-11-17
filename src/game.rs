@@ -1,14 +1,39 @@
 use clearscreen::clear;
+use dialoguer::Select;
 use regex::Regex;
 use std::io::stdin;
 
 use anyhow::{anyhow, Context, Error, Result};
 
-use crate::{board::*, player::*, tile::*};
+use crate::{board::*, player::{*, self}, tile::*};
+
+pub enum GameMode {
+    HumanVsHuman,
+    HumanVsAi,
+    AiVsAi,
+}
+
+impl GameMode {
+    pub fn select_gamemode() -> Result<Self> {
+        let options = vec!["Human vs Human", "Human vs AI", "AI vs AI"];
+        let selection = Select::new()
+            .with_prompt("Select a gamemode (use the arrow keys to make your selection)")
+            .items(&options)
+            .interact()?;
+
+        Ok(match selection {
+            0 => Self::HumanVsHuman,
+            1 => Self::HumanVsAi,
+            2 => Self::AiVsAi,
+            _ => unreachable!(),
+        })
+    }
+}
 
 pub struct Game {
     board: Board,
     move_id: usize,
+    mode: GameMode,
 }
 
 impl Game {
@@ -16,8 +41,26 @@ impl Game {
         Self {
             board: Board::new(),
             move_id: 0,
+            mode: GameMode::select_gamemode().unwrap_or(GameMode::HumanVsHuman),
         }
     }
+
+    /// This function looks at the current board and determines the best possible move it can make in that given state.
+    /// In order to figure this out, it uses the negamax algorithm, which is a variant of the minimax algorithm.  
+    pub fn get_best_move(&self) -> (usize, usize) {
+        todo!()
+    }
+
+    /* fn evaluate_board(&self, moving_player: Player) -> usize {
+        let friendly_peices = self.board.get_idx_of_player_peices(moving_player);
+        let enemy_peices = self.board.get_idx_of_player_peices(!moving_player);
+        let distance_to_promotion = todo!();
+        // Get number of peices where a capture is possible
+        let potential_captures = friendly_peices.iter().filter(|idx| self.board.can_capture(moving_player, **idx)).count();
+        let vulnerable_peices = enemy_peices.iter().filter(|idx| self.board.can_capture(!moving_player, **idx)).count();
+
+        (distance_to_promotion + potential_captures) - vulnerable_peices
+    } */
 
     pub fn run(&mut self) -> Result<Player> {
         loop {
@@ -34,11 +77,20 @@ impl Game {
                 (_, _) => (),
             };
 
-            clear()?;
+            match self.mode { 
+                GameMode::HumanVsHuman => clear()?,
+                _ => (), 
+            };
+
             println!("{}", self.board);
             self.get_stats();
             let (from, to) = loop {
-                let this_move = self.get_move();
+                let this_move = match self.mode {
+                    GameMode::HumanVsHuman => self.get_user_move(),
+                    GameMode::HumanVsAi if self.move_id % 2 == 0 => self.get_user_move(),
+                    GameMode::HumanVsAi => Ok(self.get_best_move()),
+                    GameMode::AiVsAi => Ok(self.get_best_move()),
+                };
                 if let Ok(m) = this_move {
                     break m;
                 } else {
@@ -76,11 +128,7 @@ impl Game {
         Ok(Board::coords_to_idx(x as usize - 97, y - 1))
     }
 
-    pub fn get_move(&self) -> Result<(usize, usize)> {
-        let stdin = stdin();
-        let mut from_buf = String::new();
-        let mut to_buf = String::new();
-        let expected_pattern = Regex::new(r"(?m)\([a-hA-H],\s?[1-8]\)")?;
+    pub fn get_user_move(&self) -> Result<(usize, usize)> {
         println!(
             "Moving player: {}",
             if self.move_id % 2 == 0 {
@@ -89,49 +137,33 @@ impl Game {
                 "White"
             }
         );
-        let from = loop {
-            from_buf.clear();
-            println!("Enter the source tile for your move: (x, y)");
-            stdin.read_line(&mut from_buf)?;
+        loop {
+            let from = Self::get_location("Enter the source tile for your move: xy")?;
+            let to = Self::get_location("Enter the destination tile for your move: xy")?;
 
-            if expected_pattern.is_match(&from_buf) {
-                let from_parts: Vec<&str> = from_buf[1..from_buf.len() - 2].split(',').collect();
-                let sx: char = match from_parts.first().unwrap().parse() {
-                    Ok(s) => s,
-                    Err(_) => continue,
-                };
-                let sy: usize = match from_parts.get(1).unwrap().parse() {
-                    Ok(s) => s,
-                    Err(_) => continue,
-                };
-                let from = Self::get_idx(sx, sy)?;
-                break from;
+            if self.is_valid_move(from, to) {
+                break Ok((from, to));
+            } else {
+                println!("Invalid move selected, try again");
             }
-        };
-        let to = loop {
-            to_buf.clear();
-            println!("Enter the destination tile for your move: (x, y)");
-            stdin.read_line(&mut to_buf)?;
+        }
+    }
 
-            if expected_pattern.is_match(&to_buf) {
-                let to_parts: Vec<&str> = to_buf[1..from_buf.len() - 2].split(',').collect();
-                let tx: char = match to_parts.first().unwrap().parse() {
-                    Ok(t) => t,
-                    Err(_) => continue,
-                };
-                let ty: usize = match to_parts.get(1).unwrap().parse() {
-                    Ok(t) => t,
-                    Err(_) => continue,
-                };
-                let to = Self::get_idx(tx, ty)?;
-                break to;
+    fn get_location(prompt: &str) -> Result<usize> {
+        let expected_pattern = Regex::new(r"(?m)[A-Ha-h][1-8]")?;
+        let mut buf = String::new();
+        let stdin = stdin();
+        loop {
+            buf.clear();
+            println!("{}", prompt);
+            stdin.read_line(&mut buf)?;
+
+            if expected_pattern.is_match(&buf) {
+                let x: char = buf.chars().nth(0).unwrap();
+                let y: usize = buf.chars().nth(1).unwrap() as usize - 48;
+                let pos = Self::get_idx(x, y)?;
+                break Ok(pos);
             }
-        };
-
-        if !self.is_valid_move(from, to) {
-            Err(anyhow!("Invalid move selected"))
-        } else {
-            Ok((from, to))
         }
     }
 

@@ -164,6 +164,46 @@ impl Board {
             .any(|tile| tile.kind() == TileKind::King && tile.occupied_by == Some(player))
     }
 
+    /* pub fn can_capture(&self, player: Player, peice: usize) -> bool {
+        let ul = (BOARD_SIZE * BOARD_SIZE) - 1;
+        let (x, y) = Self::idx_to_coords(peice);
+        let y_offset: isize = if let Player::Black = player { 1 } else { -1 };
+        let locations_to_capture = (
+            Self::coords_to_idx(
+                ((x as isize) - 1) as usize,
+                ((y as isize) + y_offset) as usize,
+            ),
+            Self::coords_to_idx(
+                ((x as isize) + 1) as usize,
+                ((y as isize) + y_offset) as usize,
+            ),
+        );
+        let locations_to_move_to = (
+            Self::coords_to_idx(
+                ((x as isize) - 2) as usize,
+                ((y as isize) + 2 * y_offset) as usize,
+            ),
+            Self::coords_to_idx(
+                ((x as isize) + 2) as usize,
+                ((y as isize) + 2 * y_offset) as usize,
+            ),
+        );
+
+        if locations_to_capture.0 > ul || locations_to_capture.1 > ul {
+            // peice is at the edge of the board and cannot make a capture
+            false
+        } else if locations_to_move_to.0 > ul || locations_to_move_to.1 > ul {
+            // peice is near the edge of the board and cannot make a capture
+            false
+        } else if self.board[locations_to_capture.0].occupied_by == Some(!player)
+            || self.board[locations_to_capture.1].occupied_by == Some(!player)
+        {
+            true
+        } else {
+            false
+        }
+    } */
+
     /// Make a move
     pub fn make_move(&mut self, turn_id: usize, from: usize, to: usize) -> Result<()> {
         let delta = Self::delta(from, to);
@@ -179,6 +219,7 @@ impl Board {
             return Err(anyhow!("Cannot move to the same position"));
         }
 
+
         // check they're not trying to move a white piece
         let moving_player = if turn_id % 2 == 0 {
             Player::Black
@@ -188,6 +229,10 @@ impl Board {
         if !moving_player == self.board[from].get_owner()? {
             return Err(anyhow!("Cannot move the other players piece!"));
         }
+        
+        /* if self.can_capture(moving_player, from) && !self.board[to].is_empty() {
+            return Err(anyhow!("Capture available, try another move"));
+        } */
 
         // Check that normal tiles only move +1 tile diagonally forward
         if let TileKind::Normal = self.board[from].kind() {
@@ -206,7 +251,12 @@ impl Board {
             }
 
             // Check that the peice is moving forwards
-            if dy == if let Player::Black = moving_player { -1 } else { 1 } {
+            let forwards = match moving_player {
+                Player::Black => -1,
+                Player::White => 1,
+            };
+
+            if dy == forwards {
                 return Err(anyhow!("Normal peices cannot move backwards"));
             }
         } else {
@@ -241,13 +291,12 @@ impl Board {
             self.board[to].take_ownership(moving_player);
 
             // Check if the peice needs to be promoted
-            if Self::idx_to_coords(to).1
-                == if let Player::Black = moving_player {
-                    BOARD_SIZE - 1
-                } else {
-                    0
-                }
-            {
+            let last_row = match moving_player {
+                Player::Black => BOARD_SIZE - 1,
+                Player::White => 0,
+            };
+
+            if Self::idx_to_coords(to).1 == last_row {
                 self.board[to].promote();
             }
             Ok(())
@@ -598,14 +647,14 @@ mod test {
 
         // Verify that board updates accordingly
         assert_eq!(
-            board.board()[29],
+            board.board[29],
             Tile {
                 occupied_by: Some(Player::Black),
                 kind: TileKind::Normal
             }
         );
         assert_eq!(
-            board.board()[20],
+            board.board[20],
             Tile {
                 occupied_by: None,
                 kind: TileKind::Normal
@@ -616,14 +665,14 @@ mod test {
 
         // Verify that board updates accordingly
         assert_eq!(
-            board.board()[36],
+            board.board[36],
             Tile {
                 occupied_by: Some(Player::White),
                 kind: TileKind::Normal
             },
         );
         assert_eq!(
-            board.board()[43],
+            board.board[43],
             Tile {
                 occupied_by: None,
                 kind: TileKind::Normal
@@ -631,7 +680,7 @@ mod test {
         );
 
         assert_eq!(
-            board.board()[36],
+            board.board[36],
             Tile {
                 occupied_by: Some(Player::White),
                 kind: TileKind::Normal
@@ -642,14 +691,14 @@ mod test {
 
         // Verify that capturing works as expected
         assert_eq!(
-            board.board()[29],
+            board.board[29],
             Tile {
                 occupied_by: None,
                 kind: TileKind::Normal
             }
         );
         assert_eq!(
-            board.board()[36],
+            board.board[36],
             Tile {
                 occupied_by: None,
                 kind: TileKind::Normal
@@ -657,7 +706,7 @@ mod test {
         );
 
         assert_eq!(
-            board.board()[43],
+            board.board[43],
             Tile {
                 occupied_by: Some(Player::Black),
                 kind: TileKind::Normal
@@ -667,7 +716,7 @@ mod test {
         assert!(board.make_move(1, 52, 43).is_ok());
 
         assert_eq!(
-            board.board()[43],
+            board.board[43],
             Tile {
                 occupied_by: None,
                 kind: TileKind::Normal
@@ -675,7 +724,7 @@ mod test {
         );
 
         assert_eq!(
-            board.board()[52],
+            board.board[52],
             Tile {
                 occupied_by: None,
                 kind: TileKind::Normal
@@ -683,7 +732,7 @@ mod test {
         );
 
         assert_eq!(
-            board.board()[34],
+            board.board[34],
             Tile {
                 occupied_by: Some(Player::White),
                 kind: TileKind::Normal
@@ -775,6 +824,28 @@ mod test {
         board.board[53].take_ownership(Player::White);
 
         assert!(board.make_move(0, 17, 62).is_ok());
-
     }
+
+    /* #[test]
+    fn test_can_capture() {
+        let mut b = Board::new();
+
+        b.board_mut()
+            .iter_mut()
+            .filter(|tile| !tile.is_empty())
+            .for_each(|tile| tile.leave());
+
+        b.board_mut()[Board::coords_to_idx(4, 3)].take_ownership(Player::Black);
+        b.board_mut()[Board::coords_to_idx(3, 4)].take_ownership(Player::White);
+        assert!(b.can_capture(Player::Black, Board::coords_to_idx(4, 3)));
+        b.board_mut()[Board::coords_to_idx(3, 4)].leave();
+        assert!(!b.can_capture(Player::Black, Board::coords_to_idx(4, 3)));
+        b.board_mut()[Board::coords_to_idx(3, 4)].leave();
+        b.board_mut()[Board::coords_to_idx(6, 6)].take_ownership(Player::Black);
+        b.board_mut()[Board::coords_to_idx(7, 7)].take_ownership(Player::White);
+        assert!(!b.can_capture(Player::Black, Board::coords_to_idx(6, 6)));
+        b.board_mut()[Board::coords_to_idx(6, 6)].take_ownership(Player::White);
+        b.board_mut()[Board::coords_to_idx(7, 7)].take_ownership(Player::Black);
+        assert!(!b.can_capture(Player::White, Board::coords_to_idx(6, 6)));
+    } */
 }

@@ -57,6 +57,14 @@ impl Tile {
         self.kind = TileKind::King;
     }
 
+    pub fn is_occupied_by(&self, player: Player) -> bool {
+        match self.occupied_by {
+            Some(p) if p == player => true,
+            Some(_) => false,
+            None => false,
+        }
+    }
+
     pub fn get_owner(&self) -> Result<Player> {
         match self.occupied_by {
             Some(p) => Ok(p),

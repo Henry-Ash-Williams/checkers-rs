@@ -1,6 +1,7 @@
 #![allow(clippy::needless_range_loop, unused_variables)]
 
 use std::cmp::{max, min};
+use std::ops::{Index, IndexMut};
 use std::{fmt, ops::Range};
 
 use anyhow::{anyhow, Result};
@@ -11,9 +12,11 @@ use tabled::{
 };
 
 use crate::player::Player;
+use crate::r#move::*;
 use crate::tile::{Tile, TileKind};
 
 pub const BOARD_SIZE: usize = 8;
+pub const FORCE_CAPTURE: bool = false;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Board {
@@ -21,6 +24,11 @@ pub struct Board {
 }
 
 impl Board {
+    pub fn empty() -> Self {
+        Self {
+            board: [Tile::empty(); BOARD_SIZE * BOARD_SIZE],
+        }
+    }
     pub fn new() -> Self {
         let mut board = [Tile::empty(); BOARD_SIZE * BOARD_SIZE];
 
@@ -43,11 +51,11 @@ impl Board {
         Self { board }
     }
 
-    pub fn board(&self) -> &[Tile] {
+    pub fn board(&self) -> &[Tile; 64] {
         &self.board
     }
 
-    pub fn board_mut(&mut self) -> &mut [Tile] {
+    pub fn board_mut(&mut self) -> &mut [Tile; 64] {
         &mut self.board
     }
 
@@ -61,16 +69,6 @@ impl Board {
         (idx % BOARD_SIZE, idx / BOARD_SIZE)
     }
 
-    /// Calculate the manhattan distance between two tiles on the board
-    fn delta(from: usize, to: usize) -> (isize, isize) {
-        let from = Self::idx_to_coords(from);
-        let to = Self::idx_to_coords(to);
-        (
-            to.0 as isize - from.0 as isize,
-            to.1 as isize - from.1 as isize,
-        )
-    }
-
     /// Get the number of remaining peices for a given player
     pub fn get_remaining_peices(&self, player: Player) -> usize {
         self.into_iter()
@@ -80,19 +78,14 @@ impl Board {
     }
 
     /// Handle moving the king
-    pub fn handle_king_movement(
-        &mut self,
-        moving_player: Player,
-        from: usize,
-        to: usize,
-    ) -> Result<()> {
-        if from == to {
+    pub fn handle_king_movement(&mut self, moving_player: Player, this_move: Move) -> Result<()> {
+        if this_move.from() == this_move.to() {
             return Err(anyhow!(
                 "Cannot move to the same position as where the peice started"
             ));
         }
 
-        let delta = Self::delta(from, to);
+        let delta = this_move.delta();
 
         // Verify peice is moving diagonally
         let (dx, dy) = delta;
@@ -104,42 +97,42 @@ impl Board {
         // Make sure the peice is able to move, i.e. is not blocked by any
         // friendly peices, and capture any enemy peices in its way
 
-        let from_coords = Self::idx_to_coords(from);
-        let to_coords = Self::idx_to_coords(to);
+        let from_coords = this_move.from().coords();
+        let to_coords = this_move.to().coords();
 
         let (sx, sy) = from_coords;
         let (tx, ty) = to_coords;
 
         // Generate a list of indicies the king must move over to get to the target
-        let moves: Vec<usize> = (min(sx, tx)..max(sx, tx))
+        let moves: Vec<Position> = (min(sx, tx)..max(sx, tx))
             .zip(min(sy, ty)..max(sy, ty))
-            .map(|(x, y)| Self::coords_to_idx(x, y))
+            .map(|(x, y)| Position::from_coords(x, y))
             .collect();
 
         // Check the move is not blocked by any friendly peices, make sure to ignore the moving tile
         let move_contains_friendly_peices = moves
             .iter()
-            .any(|idx| self.board[*idx].occupied_by == Some(moving_player) && *idx != from);
+            .any(|idx| self[*idx].occupied_by == Some(moving_player) && *idx != this_move.from());
 
         if move_contains_friendly_peices {
             return Err(anyhow!("Move blocked by friendly peice(s)"));
         }
 
         // Capture the peices in the way of the king
-        let captured_peices: Vec<usize> = moves
+        let captured_peices: Vec<Position> = moves
             .iter()
-            .filter(|idx| self.board[**idx].occupied_by == Some(!moving_player))
+            .filter(|idx| self[**idx].occupied_by == Some(!moving_player))
             .copied()
             .collect();
 
         for idx in captured_peices {
-            self.board[idx].leave()
+            self[idx].leave()
         }
 
-        self.board[from].leave();
-        self.board[from].demote();
-        self.board[to].take_ownership(moving_player);
-        self.board[to].promote();
+        self[this_move.from()].leave();
+        self[this_move.from()].demote();
+        self[this_move.to()].take_ownership(moving_player);
+        self[this_move.to()].promote();
 
         Ok(())
     }
@@ -164,49 +157,41 @@ impl Board {
             .any(|tile| tile.kind() == TileKind::King && tile.occupied_by == Some(player))
     }
 
-    /* pub fn can_capture(&self, player: Player, peice: usize) -> bool {
-        let ul = (BOARD_SIZE * BOARD_SIZE) - 1;
-        let (x, y) = Self::idx_to_coords(peice);
+    pub fn can_capture(&self, player: Player, peice: Position) -> bool {
+        let (x, y) = peice.coords();
         let y_offset: isize = if let Player::Black = player { 1 } else { -1 };
         let locations_to_capture = (
-            Self::coords_to_idx(
+            Position::from_coords_checked(
                 ((x as isize) - 1) as usize,
                 ((y as isize) + y_offset) as usize,
             ),
-            Self::coords_to_idx(
+            Position::from_coords_checked(
                 ((x as isize) + 1) as usize,
                 ((y as isize) + y_offset) as usize,
             ),
         );
         let locations_to_move_to = (
-            Self::coords_to_idx(
+            Position::from_coords_checked(
                 ((x as isize) - 2) as usize,
                 ((y as isize) + 2 * y_offset) as usize,
             ),
-            Self::coords_to_idx(
+            Position::from_coords_checked(
                 ((x as isize) + 2) as usize,
                 ((y as isize) + 2 * y_offset) as usize,
             ),
         );
 
-        if locations_to_capture.0 > ul || locations_to_capture.1 > ul {
-            // peice is at the edge of the board and cannot make a capture
-            false
-        } else if locations_to_move_to.0 > ul || locations_to_move_to.1 > ul {
-            // peice is near the edge of the board and cannot make a capture
-            false
-        } else if self.board[locations_to_capture.0].occupied_by == Some(!player)
-            || self.board[locations_to_capture.1].occupied_by == Some(!player)
-        {
-            true
-        } else {
-            false
+        match (locations_to_capture, locations_to_move_to) {
+            ((Ok(p1), Ok(p2)), _) => {
+                self[p1].occupied_by == Some(!player) || self[p1].occupied_by == Some(!player)
+            }
+            (_, _) => false,
         }
-    } */
+    }
 
     /// Make a move
-    pub fn make_move(&mut self, turn_id: usize, from: usize, to: usize) -> Result<()> {
-        let delta = Self::delta(from, to);
+    pub fn make_move(&mut self, turn_id: usize, this_move: Move) -> Result<()> {
+        let delta = this_move.delta();
 
         // Check no-ones already won
         if self.has_player_won(Player::Black) {
@@ -215,10 +200,9 @@ impl Board {
             return Err(anyhow!("White has already won!"));
         }
 
-        if from == to {
+        if this_move.from() == this_move.to() {
             return Err(anyhow!("Cannot move to the same position"));
         }
-
 
         // check they're not trying to move a white piece
         let moving_player = if turn_id % 2 == 0 {
@@ -226,16 +210,17 @@ impl Board {
         } else {
             Player::White
         };
-        if !moving_player == self.board[from].get_owner()? {
+
+        if !moving_player == self[this_move.from()].get_owner()? {
             return Err(anyhow!("Cannot move the other players piece!"));
         }
-        
-        /* if self.can_capture(moving_player, from) && !self.board[to].is_empty() {
+
+        /* if self.can_capture(moving_player, this_move.from()) {
             return Err(anyhow!("Capture available, try another move"));
-        } */
+        }*/
 
         // Check that normal tiles only move +1 tile diagonally forward
-        if let TileKind::Normal = self.board[from].kind() {
+        if let TileKind::Normal = self.board[this_move.from().idx()].kind() {
             let (dx, dy) = delta;
 
             // Check that the peice is moving diagonally
@@ -260,24 +245,23 @@ impl Board {
                 return Err(anyhow!("Normal peices cannot move backwards"));
             }
         } else {
-            return self.handle_king_movement(moving_player, from, to);
+            return self.handle_king_movement(moving_player, this_move);
         }
 
         // Check if target tile is occupied
-        if !self.board[to].is_empty() {
-            if !moving_player == self.board[to].get_owner()? {
+        if !self[this_move.to()].is_empty() {
+            if !moving_player == self[this_move.to()].get_owner()? {
                 // Handle taking an opponents peice by jumping over it
-                let to_coords = Self::idx_to_coords(to);
-                let next_tile = (
+                let to_coords = this_move.to().coords();
+                let next_tile = Position::from_coords(
                     (to_coords.0 as isize + delta.0) as usize,
                     (to_coords.1 as isize + delta.1) as usize,
                 );
 
-                if self.board[Self::coords_to_idx(next_tile.0, next_tile.1)].is_empty() {
-                    self.board[from].leave();
-                    self.board[to].leave();
-                    self.board[Self::coords_to_idx(next_tile.0, next_tile.1)]
-                        .take_ownership(moving_player);
+                if self[next_tile].is_empty() {
+                    self[this_move.from()].leave();
+                    self[this_move.to()].leave();
+                    self[next_tile].take_ownership(moving_player);
                     Ok(())
                 } else {
                     Err(anyhow!("Next tile is already occupied!"))
@@ -287,8 +271,8 @@ impl Board {
             }
         } else {
             // Simple move without capturing an enemy peice
-            self.board[from].leave();
-            self.board[to].take_ownership(moving_player);
+            self[this_move.from()].leave();
+            self[this_move.to()].take_ownership(moving_player);
 
             // Check if the peice needs to be promoted
             let last_row = match moving_player {
@@ -296,8 +280,8 @@ impl Board {
                 Player::White => 0,
             };
 
-            if Self::idx_to_coords(to).1 == last_row {
-                self.board[to].promote();
+            if this_move.to().coords().1 == last_row {
+                self[this_move.to()].promote();
             }
             Ok(())
         }
@@ -346,11 +330,26 @@ impl IntoIterator for Board {
     }
 }
 
+impl Index<Position> for Board {
+    type Output = Tile;
+
+    fn index(&self, index: Position) -> &Self::Output {
+        &self.board[index.idx()]
+    }
+}
+
+impl IndexMut<Position> for Board {
+    fn index_mut(&mut self, index: Position) -> &mut Self::Output {
+        &mut self.board[index.idx()]
+    }
+}
+
 #[cfg(test)]
 mod test {
     use crate::{
         board::{Tile, TileKind, BOARD_SIZE},
         player::Player,
+        r#move::{Move, Position},
     };
 
     use super::Board;
@@ -640,10 +639,10 @@ mod test {
         let mut board = Board::new();
 
         // Check we cannot move to the same location as we started
-        assert!(board.make_move(0, 20, 20).is_err());
+        assert!(board.make_move(0, Move::new(20, 20)).is_err());
 
         // Move e3 to f4
-        assert!(board.make_move(0, 20, 29).is_ok());
+        assert!(board.make_move(0, Move::new(20, 29)).is_ok());
 
         // Verify that board updates accordingly
         assert_eq!(
@@ -661,7 +660,7 @@ mod test {
             }
         );
 
-        assert!(board.make_move(1, 43, 36).is_ok());
+        assert!(board.make_move(1, Move::new(43, 36)).is_ok());
 
         // Verify that board updates accordingly
         assert_eq!(
@@ -687,7 +686,7 @@ mod test {
             }
         );
 
-        assert!(board.make_move(0, 29, 36).is_ok());
+        assert!(board.make_move(0, Move::new(29, 36)).is_ok());
 
         // Verify that capturing works as expected
         assert_eq!(
@@ -713,7 +712,7 @@ mod test {
             }
         );
 
-        assert!(board.make_move(1, 52, 43).is_ok());
+        assert!(board.make_move(1, Move::new(52, 43)).is_ok());
 
         assert_eq!(
             board.board[43],
@@ -739,7 +738,7 @@ mod test {
             }
         );
 
-        assert!(board.make_move(0, 18, 10).is_err());
+        assert!(board.make_move(0, Move::new(18, 10)).is_err());
     }
 
     #[test]
@@ -756,11 +755,11 @@ mod test {
         // Add one white peice back so the game doesn't think black's won
         board.board[63].take_ownership(Player::White);
 
-        assert!(board.make_move(0, 22, 29).is_ok());
-        assert!(board.make_move(0, 29, 36).is_ok());
-        assert!(board.make_move(0, 36, 43).is_ok());
-        assert!(board.make_move(0, 43, 50).is_ok());
-        assert!(board.make_move(0, 50, 59).is_ok());
+        assert!(board.make_move(0, Move::new(22, 29)).is_ok());
+        assert!(board.make_move(0, Move::new(29, 36)).is_ok());
+        assert!(board.make_move(0, Move::new(36, 43)).is_ok());
+        assert!(board.make_move(0, Move::new(43, 50)).is_ok());
+        assert!(board.make_move(0, Move::new(50, 59)).is_ok());
         assert!(board.board[59].kind() == TileKind::King);
     }
 
@@ -786,8 +785,8 @@ mod test {
             }
         );
 
-        assert!(board.make_move(0, 42, 14).is_ok());
-        assert!(board.make_move(0, 42, 42).is_err());
+        assert!(board.make_move(0, Move::new(42, 14)).is_ok());
+        assert!(board.make_move(0, Move::new(42, 42)).is_err());
 
         assert_eq!(
             board.board[14],
@@ -811,7 +810,7 @@ mod test {
         };
         board.board[17].take_ownership(Player::White);
 
-        assert!(board.make_move(0, 35, 17).is_ok());
+        assert!(board.make_move(0, Move::new(35, 17)).is_ok());
         assert_eq!(
             board.board[17],
             Tile {
@@ -823,10 +822,10 @@ mod test {
         board.board[44].take_ownership(Player::White);
         board.board[53].take_ownership(Player::White);
 
-        assert!(board.make_move(0, 17, 62).is_ok());
+        assert!(board.make_move(0, Move::new(17, 62)).is_ok());
     }
 
-    /* #[test]
+    #[test]
     fn test_can_capture() {
         let mut b = Board::new();
 
@@ -837,15 +836,15 @@ mod test {
 
         b.board_mut()[Board::coords_to_idx(4, 3)].take_ownership(Player::Black);
         b.board_mut()[Board::coords_to_idx(3, 4)].take_ownership(Player::White);
-        assert!(b.can_capture(Player::Black, Board::coords_to_idx(4, 3)));
+        assert!(b.can_capture(Player::Black, Position::from_coords(4, 3)));
         b.board_mut()[Board::coords_to_idx(3, 4)].leave();
-        assert!(!b.can_capture(Player::Black, Board::coords_to_idx(4, 3)));
+        assert!(!b.can_capture(Player::Black, Position::from_coords(4, 3)));
         b.board_mut()[Board::coords_to_idx(3, 4)].leave();
         b.board_mut()[Board::coords_to_idx(6, 6)].take_ownership(Player::Black);
         b.board_mut()[Board::coords_to_idx(7, 7)].take_ownership(Player::White);
-        assert!(!b.can_capture(Player::Black, Board::coords_to_idx(6, 6)));
-        b.board_mut()[Board::coords_to_idx(6, 6)].take_ownership(Player::White);
-        b.board_mut()[Board::coords_to_idx(7, 7)].take_ownership(Player::Black);
-        assert!(!b.can_capture(Player::White, Board::coords_to_idx(6, 6)));
-    } */
+        // assert!(!b.can_capture(Player::Black, Position::from_coords(6, 6)));
+        // b.board_mut()[Board::coords_to_idx(6, 6)].take_ownership(Player::White);
+        // b.board_mut()[Board::coords_to_idx(7, 7)].take_ownership(Player::Black);
+        // assert!(!b.can_capture(Player::White, Position::from_coords(6, 6)));
+    }
 }

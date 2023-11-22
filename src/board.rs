@@ -1,8 +1,8 @@
-#![allow(clippy::needless_range_loop, unused_variables)]
+#![allow(clippy::needless_range_loop)]
 
 use std::cmp::{max, min};
+use std::fmt;
 use std::ops::{Index, IndexMut};
-use std::{fmt, ops::Range};
 
 use anyhow::{anyhow, Result};
 
@@ -16,7 +16,10 @@ use crate::r#move::*;
 use crate::tile::{Tile, TileKind};
 
 pub const BOARD_SIZE: usize = 8;
-pub const FORCE_CAPTURE: bool = false;
+
+// True in release builds, false in debug builds 
+// pub const FORCE_CAPTURE: bool = !cfg!(debug_assertions);
+pub const FORCE_CAPTURE: bool = true; 
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Board {
@@ -61,6 +64,7 @@ impl Board {
 
     /// Convert a pair of coordinates, `x`, and `y` to an index in the board array
     pub fn coords_to_idx(x: usize, y: usize) -> usize {
+        println!("Converting ({x}, {y})");
         (y * BOARD_SIZE) + x
     }
 
@@ -142,12 +146,12 @@ impl Board {
         self.get_remaining_peices(!player) == 0
     }
 
-    pub fn get_idx_of_player_peices(&self, player: Player) -> Vec<usize> {
+    pub fn get_idx_of_player_peices(&self, player: Player) -> Vec<Position> {
         self.board
             .iter()
             .enumerate()
             .filter(|(_, tile)| tile.occupied_by == Some(!player) || tile.is_empty())
-            .map(|(idx, _)| idx)
+            .map(|(idx, _)| Position::from_idx(idx))
             .collect()
     }
 
@@ -214,10 +218,12 @@ impl Board {
         if !moving_player == self[this_move.from()].get_owner()? {
             return Err(anyhow!("Cannot move the other players piece!"));
         }
-
-        /* if self.can_capture(moving_player, this_move.from()) {
+        if FORCE_CAPTURE
+            && self.can_capture(moving_player, this_move.from())
+            && !self[this_move.to()].is_occupied_by(!moving_player)
+        {
             return Err(anyhow!("Capture available, try another move"));
-        }*/
+        }
 
         // Check that normal tiles only move +1 tile diagonally forward
         if let TileKind::Normal = self.board[this_move.from().idx()].kind() {
@@ -354,6 +360,30 @@ mod test {
 
     use super::Board;
 
+    macro_rules! tile {
+        ($owner:expr ) => {
+            Tile {
+                occupied_by: Some($owner),
+                kind: TileKind::Normal,
+            }
+        };
+        () => {
+            Tile {
+                occupied_by: None,
+                kind: TileKind::Normal,
+            }
+        };
+    }
+
+    macro_rules! king {
+        ($owner:expr) => {
+            Tile {
+                occupied_by: Some($owner),
+                kind: TileKind::King,
+            }
+        };
+    }
+
     #[test]
     fn test_board_initializer() {
         let board = Board::new();
@@ -362,262 +392,70 @@ mod test {
         assert_eq!(
             board.board,
             [
-                Tile {
-                    occupied_by: Some(Player::Black),
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: None,
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: Some(Player::Black),
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: None,
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: Some(Player::Black),
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: None,
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: Some(Player::Black),
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: None,
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: None,
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: Some(Player::Black),
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: None,
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: Some(Player::Black),
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: None,
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: Some(Player::Black),
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: None,
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: Some(Player::Black),
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: Some(Player::Black),
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: None,
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: Some(Player::Black),
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: None,
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: Some(Player::Black),
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: None,
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: Some(Player::Black),
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: None,
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: None,
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: None,
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: None,
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: None,
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: None,
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: None,
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: None,
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: None,
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: None,
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: None,
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: None,
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: None,
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: None,
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: None,
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: None,
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: None,
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: None,
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: Some(Player::White),
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: None,
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: Some(Player::White),
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: None,
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: Some(Player::White),
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: None,
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: Some(Player::White),
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: Some(Player::White),
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: None,
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: Some(Player::White),
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: None,
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: Some(Player::White),
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: None,
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: Some(Player::White),
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: None,
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: None,
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: Some(Player::White),
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: None,
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: Some(Player::White),
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: None,
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: Some(Player::White),
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: None,
-                    kind: TileKind::Normal
-                },
-                Tile {
-                    occupied_by: Some(Player::White),
-                    kind: TileKind::Normal
-                },
+                tile!(Player::Black),
+                tile!(),
+                tile!(Player::Black),
+                tile!(),
+                tile!(Player::Black),
+                tile!(),
+                tile!(Player::Black),
+                tile!(),
+                tile!(),
+                tile!(Player::Black),
+                tile!(),
+                tile!(Player::Black),
+                tile!(),
+                tile!(Player::Black),
+                tile!(),
+                tile!(Player::Black),
+                tile!(Player::Black),
+                tile!(),
+                tile!(Player::Black),
+                tile!(),
+                tile!(Player::Black),
+                tile!(),
+                tile!(Player::Black),
+                tile!(),
+                tile!(),
+                tile!(),
+                tile!(),
+                tile!(),
+                tile!(),
+                tile!(),
+                tile!(),
+                tile!(),
+                tile!(),
+                tile!(),
+                tile!(),
+                tile!(),
+                tile!(),
+                tile!(),
+                tile!(),
+                tile!(),
+                tile!(),
+                tile!(Player::White),
+                tile!(),
+                tile!(Player::White),
+                tile!(),
+                tile!(Player::White),
+                tile!(),
+                tile!(Player::White),
+                tile!(Player::White),
+                tile!(),
+                tile!(Player::White),
+                tile!(),
+                tile!(Player::White),
+                tile!(),
+                tile!(Player::White),
+                tile!(),
+                tile!(),
+                tile!(Player::White),
+                tile!(),
+                tile!(Player::White),
+                tile!(),
+                tile!(Player::White),
+                tile!(),
+                tile!(Player::White),
             ]
         );
         // Each player has 12 tiles
@@ -643,7 +481,6 @@ mod test {
 
         // Move e3 to f4
         assert!(board.make_move(0, Move::new(20, 29)).is_ok());
-
         // Verify that board updates accordingly
         assert_eq!(
             board.board[29],
@@ -677,7 +514,6 @@ mod test {
                 kind: TileKind::Normal
             },
         );
-
         assert_eq!(
             board.board[36],
             Tile {
@@ -686,6 +522,8 @@ mod test {
             }
         );
 
+        // assert!(board.make_move(0, Move::new(29, 36)).is_ok());
+        
         assert!(board.make_move(0, Move::new(29, 36)).is_ok());
 
         // Verify that capturing works as expected
@@ -713,6 +551,7 @@ mod test {
         );
 
         assert!(board.make_move(1, Move::new(52, 43)).is_ok());
+        println!("{board}");
 
         assert_eq!(
             board.board[43],

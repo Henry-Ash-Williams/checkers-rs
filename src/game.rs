@@ -111,16 +111,22 @@ impl Game {
             .collect())
     }
 
-    /* fn evaluate_board(&self, moving_player: Player) -> usize {
+    fn evaluate_board(&self, moving_player: Player) -> isize {
         let friendly_peices = self.board.get_idx_of_player_peices(moving_player);
         let enemy_peices = self.board.get_idx_of_player_peices(!moving_player);
-        let distance_to_promotion = todo!();
+        // let distance_to_promotion = todo!();
         // Get number of peices where a capture is possible
-        let potential_captures = friendly_peices.iter().filter(|idx| self.board.can_capture(moving_player, **idx)).count();
-        let vulnerable_peices = enemy_peices.iter().filter(|idx| self.board.can_capture(!moving_player, **idx)).count();
+        let potential_captures = friendly_peices
+            .iter()
+            .filter(|idx| self.board.can_capture(moving_player, **idx))
+            .count();
+        let vulnerable_peices = enemy_peices
+            .iter()
+            .filter(|idx| self.board.can_capture(!moving_player, **idx))
+            .count();
 
-        (distance_to_promotion + potential_captures) - vulnerable_peices
-    } */
+        potential_captures as isize - vulnerable_peices as isize
+    }
 
     pub fn run(&mut self) -> Result<Player> {
         loop {
@@ -181,17 +187,6 @@ impl Game {
         );
     }
 
-    pub fn get_idx(x: char, y: usize) -> Result<usize> {
-        let x_range: Vec<char> = (97u8..97u8 + BOARD_SIZE as u8).map(|n| n as char).collect();
-        let y_range: Vec<usize> = (1..BOARD_SIZE + 1).collect();
-
-        if !x_range.contains(&x) || !y_range.contains(&y) {
-            return Err(anyhow!("Invalid location selected"));
-        }
-
-        Ok(Board::coords_to_idx(x as usize - 97, y - 1))
-    }
-
     pub fn get_user_move(&self) -> Result<Move> {
         println!(
             "Moving player: {}",
@@ -223,11 +218,8 @@ impl Game {
             println!("{}", prompt);
             stdin.read_line(&mut buf)?;
 
-            if expected_pattern.is_match(&buf) {
-                let x: char = buf.chars().nth(0).unwrap();
-                let y: usize = buf.chars().nth(1).unwrap() as usize - 48;
-                let pos = Position::from_idx(Self::get_idx(x, y)?);
-                break Ok(pos);
+            if let Ok(pos) = Position::from_str(buf.clone()) {
+                return Ok(pos);
             }
         }
     }

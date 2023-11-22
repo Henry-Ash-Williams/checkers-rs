@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Result};
+use regex::Regex;
 
 use crate::board::*;
 
@@ -36,6 +37,29 @@ impl Position {
         Self::from_idx_checked(idx)
     }
 
+    pub fn from_str<S: Into<String>>(buffer: S) -> Result<Self> {
+        let buffer: String = buffer.into();
+        let expected_pattern = Regex::new(r"(?m)[A-Ha-h][1-8]")?;
+
+        if expected_pattern.is_match(&buffer) {
+            // SAFETY: guarentted not to panic as the regex to enter this path
+            // requires length == 2
+            let x: char = buffer.chars().nth(0).unwrap();
+            let y: usize = buffer.chars().nth(1).unwrap() as usize - 48;
+            let x_range: Vec<char> = (97u8..97u8 + BOARD_SIZE as u8).map(|n| n as char).collect();
+            let y_range: Vec<usize> = (1..BOARD_SIZE + 1).collect();
+
+            if !x_range.contains(&x) || !y_range.contains(&y) {
+                return Err(anyhow!("invalid location selected"));
+            }
+
+            let pos = Position::from_idx(Board::coords_to_idx(x as usize - 97, y - 1));
+            Ok(pos)
+        } else {
+            Err(anyhow!("Could not parse the string"))
+        }
+    }
+
     pub fn idx(&self) -> usize {
         self.0
     }
@@ -70,6 +94,9 @@ impl Move {
         }
     }
 
+    pub fn from_positions(from: Position, to: Position) -> Self {
+        Self { from, to }
+    }
     /// Calculate the manhattan distance between two tiles on the board
     pub fn delta(&self) -> (isize, isize) {
         let from = self.from.coords();

@@ -31,8 +31,11 @@ impl Position {
         Self::from_idx(idx)
     }
 
-    pub fn from_coords_checked(x: usize, y: usize) -> Result<Self> {
-        let idx = Board::coords_to_idx(x, y);
+    pub fn from_coords_checked(x: isize, y: isize) -> Result<Self> {
+        if x < 0 || y < 0 || x > BOARD_SIZE as isize || y > BOARD_SIZE as isize {
+            return Err(anyhow!("Index error"));
+        }
+        let idx = Board::coords_to_idx(x as usize, y as usize);
 
         Self::from_idx_checked(idx)
     }

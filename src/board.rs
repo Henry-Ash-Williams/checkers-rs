@@ -12,16 +12,12 @@ use tabled::{
 };
 
 use crate::player::Player;
-use crate::r#move::*;
 use crate::tile::{Tile, TileKind};
+use crate::{king_moves, r#move::*};
 
 pub const BOARD_SIZE: usize = 8;
 
-// True in release builds, false in debug builds 
-// pub const FORCE_CAPTURE: bool = !cfg!(debug_assertions);
-pub const FORCE_CAPTURE: bool = true; 
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Board {
     board: [Tile; BOARD_SIZE * BOARD_SIZE],
 }
@@ -64,7 +60,6 @@ impl Board {
 
     /// Convert a pair of coordinates, `x`, and `y` to an index in the board array
     pub fn coords_to_idx(x: usize, y: usize) -> usize {
-        println!("Converting ({x}, {y})");
         (y * BOARD_SIZE) + x
     }
 
@@ -85,7 +80,7 @@ impl Board {
     pub fn handle_king_movement(&mut self, moving_player: Player, this_move: Move) -> Result<()> {
         if this_move.from() == this_move.to() {
             return Err(anyhow!(
-                "Cannot move to the same position as where the peice started"
+                "Cannot move to the same position as where the piece started"
             ));
         }
 
@@ -150,7 +145,7 @@ impl Board {
         self.board
             .iter()
             .enumerate()
-            .filter(|(_, tile)| tile.occupied_by == Some(!player) || tile.is_empty())
+            .filter(|(_, tile)| tile.occupied_by != Some(!player) && !tile.is_empty())
             .map(|(idx, _)| Position::from_idx(idx))
             .collect()
     }
@@ -162,27 +157,25 @@ impl Board {
     }
 
     pub fn can_capture(&self, player: Player, peice: Position) -> bool {
+        if let TileKind::King = self[peice].kind() {
+            let locs = king_moves::KING_MOVES[peice.idx()];
+
+            let peices: Vec<_> = locs
+                .iter()
+                .map(|pos| self[Position::from_idx(*pos)])
+                .collect();
+            return peices.iter().any(|p| p.is_occupied_by(!player));
+        }
+
         let (x, y) = peice.coords();
         let y_offset: isize = if let Player::Black = player { 1 } else { -1 };
         let locations_to_capture = (
-            Position::from_coords_checked(
-                ((x as isize) - 1) as usize,
-                ((y as isize) + y_offset) as usize,
-            ),
-            Position::from_coords_checked(
-                ((x as isize) + 1) as usize,
-                ((y as isize) + y_offset) as usize,
-            ),
+            Position::from_coords_checked((x as isize) - 1, (y as isize) + y_offset),
+            Position::from_coords_checked((x as isize) + 1, (y as isize) + y_offset),
         );
         let locations_to_move_to = (
-            Position::from_coords_checked(
-                ((x as isize) - 2) as usize,
-                ((y as isize) + 2 * y_offset) as usize,
-            ),
-            Position::from_coords_checked(
-                ((x as isize) + 2) as usize,
-                ((y as isize) + 2 * y_offset) as usize,
-            ),
+            Position::from_coords_checked((x as isize) - 2, (y as isize) + 2 * y_offset),
+            Position::from_coords_checked((x as isize) + 2, (y as isize) + 2 * y_offset),
         );
 
         match (locations_to_capture, locations_to_move_to) {
@@ -218,9 +211,11 @@ impl Board {
         if !moving_player == self[this_move.from()].get_owner()? {
             return Err(anyhow!("Cannot move the other players piece!"));
         }
-        if FORCE_CAPTURE
-            && self.can_capture(moving_player, this_move.from())
+
+        // TODO: Needs a separate check for forcing king captures
+        if self.can_capture(moving_player, this_move.from())
             && !self[this_move.to()].is_occupied_by(!moving_player)
+            && self[this_move.from()].kind() == TileKind::Normal
         {
             return Err(anyhow!("Capture available, try another move"));
         }
@@ -361,7 +356,7 @@ mod test {
     use super::Board;
 
     macro_rules! tile {
-        ($owner:expr ) => {
+        ($owner:expr) => {
             Tile {
                 occupied_by: Some($owner),
                 kind: TileKind::Normal,
@@ -482,100 +477,34 @@ mod test {
         // Move e3 to f4
         assert!(board.make_move(0, Move::new(20, 29)).is_ok());
         // Verify that board updates accordingly
-        assert_eq!(
-            board.board[29],
-            Tile {
-                occupied_by: Some(Player::Black),
-                kind: TileKind::Normal
-            }
-        );
-        assert_eq!(
-            board.board[20],
-            Tile {
-                occupied_by: None,
-                kind: TileKind::Normal
-            }
-        );
+        assert_eq!(board.board[29], tile!(Player::Black));
+        assert_eq!(board.board[20], tile!());
 
         assert!(board.make_move(1, Move::new(43, 36)).is_ok());
 
         // Verify that board updates accordingly
-        assert_eq!(
-            board.board[36],
-            Tile {
-                occupied_by: Some(Player::White),
-                kind: TileKind::Normal
-            },
-        );
-        assert_eq!(
-            board.board[43],
-            Tile {
-                occupied_by: None,
-                kind: TileKind::Normal
-            },
-        );
-        assert_eq!(
-            board.board[36],
-            Tile {
-                occupied_by: Some(Player::White),
-                kind: TileKind::Normal
-            }
-        );
+        assert_eq!(board.board[36], tile!(Player::White));
+        assert_eq!(board.board[43], tile!());
+        assert_eq!(board.board[36], tile!(Player::White));
 
-        // assert!(board.make_move(0, Move::new(29, 36)).is_ok());
-        
         assert!(board.make_move(0, Move::new(29, 36)).is_ok());
 
         // Verify that capturing works as expected
-        assert_eq!(
-            board.board[29],
-            Tile {
-                occupied_by: None,
-                kind: TileKind::Normal
-            }
-        );
-        assert_eq!(
-            board.board[36],
-            Tile {
-                occupied_by: None,
-                kind: TileKind::Normal
-            }
-        );
+        assert_eq!(board.board[29], tile!());
+        assert_eq!(board.board[36], tile!());
 
-        assert_eq!(
-            board.board[43],
-            Tile {
-                occupied_by: Some(Player::Black),
-                kind: TileKind::Normal
-            }
-        );
+        assert_eq! {
+           board.board[43],
+           tile!(Player::Black)
+        };
 
         assert!(board.make_move(1, Move::new(52, 43)).is_ok());
-        println!("{board}");
 
-        assert_eq!(
-            board.board[43],
-            Tile {
-                occupied_by: None,
-                kind: TileKind::Normal
-            }
-        );
+        assert_eq!(board.board[43], tile!(),);
 
-        assert_eq!(
-            board.board[52],
-            Tile {
-                occupied_by: None,
-                kind: TileKind::Normal
-            }
-        );
+        assert_eq!(board.board[52], tile!());
 
-        assert_eq!(
-            board.board[34],
-            Tile {
-                occupied_by: Some(Player::White),
-                kind: TileKind::Normal
-            }
-        );
+        assert_eq!(board.board[34], tile!(Player::White));
 
         assert!(board.make_move(0, Move::new(18, 10)).is_err());
     }
@@ -616,51 +545,26 @@ mod test {
         board.board[28].take_ownership(Player::White);
 
         assert_eq!(board.board[42].kind(), TileKind::King);
-        assert_eq!(
-            board.board[28],
-            Tile {
-                occupied_by: Some(Player::White),
-                kind: TileKind::Normal
-            }
-        );
-
+        assert_eq!(board.board[28], tile!(Player::White));
+        println!("{board}");
+        println!("{}", Move::new(42, 14));
         assert!(board.make_move(0, Move::new(42, 14)).is_ok());
         assert!(board.make_move(0, Move::new(42, 42)).is_err());
 
-        assert_eq!(
-            board.board[14],
-            Tile {
-                occupied_by: Some(Player::Black),
-                kind: TileKind::King
-            }
-        );
-        assert_eq!(
-            board.board[28],
-            Tile {
-                occupied_by: None,
-                kind: TileKind::Normal
-            }
-        );
+        assert_eq!(board.board[14], king!(Player::Black));
+        assert_eq!(board.board[28], tile!());
 
         board.board[14].leave();
-        board.board[35] = Tile {
-            occupied_by: Some(Player::Black),
-            kind: TileKind::King,
-        };
+        board.board[35] = king!(Player::Black);
         board.board[17].take_ownership(Player::White);
 
         assert!(board.make_move(0, Move::new(35, 17)).is_ok());
-        assert_eq!(
-            board.board[17],
-            Tile {
-                occupied_by: Some(Player::Black),
-                kind: TileKind::King
-            }
-        );
+        assert_eq!(board.board[17], king!(Player::Black));
 
         board.board[44].take_ownership(Player::White);
         board.board[53].take_ownership(Player::White);
 
+        println!("{}", Move::new(17, 62));
         assert!(board.make_move(0, Move::new(17, 62)).is_ok());
     }
 
@@ -681,9 +585,9 @@ mod test {
         b.board_mut()[Board::coords_to_idx(3, 4)].leave();
         b.board_mut()[Board::coords_to_idx(6, 6)].take_ownership(Player::Black);
         b.board_mut()[Board::coords_to_idx(7, 7)].take_ownership(Player::White);
-        // assert!(!b.can_capture(Player::Black, Position::from_coords(6, 6)));
-        // b.board_mut()[Board::coords_to_idx(6, 6)].take_ownership(Player::White);
-        // b.board_mut()[Board::coords_to_idx(7, 7)].take_ownership(Player::Black);
-        // assert!(!b.can_capture(Player::White, Position::from_coords(6, 6)));
+        assert!(!b.can_capture(Player::Black, Position::from_coords(6, 6)));
+        b.board_mut()[Board::coords_to_idx(6, 6)].take_ownership(Player::White);
+        b.board_mut()[Board::coords_to_idx(7, 7)].take_ownership(Player::Black);
+        assert!(!b.can_capture(Player::White, Position::from_coords(6, 6)));
     }
 }

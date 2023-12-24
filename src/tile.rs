@@ -20,7 +20,10 @@ impl fmt::Display for Tile {
             f,
             "{}",
             match self.occupied_by {
-                None => " ",
+                None => match self.kind {
+                    TileKind::Normal => " ",
+                    TileKind::King => "k",
+                },
                 Some(t) => {
                     match (t, self.kind()) {
                         (Player::Black, TileKind::Normal) => "",
@@ -78,6 +81,9 @@ impl Tile {
 
     pub fn leave(&mut self) {
         self.occupied_by = None;
+        if let TileKind::King = self.kind {
+            self.demote();
+        }
     }
 
     pub fn kind(&self) -> TileKind {

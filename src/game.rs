@@ -1,7 +1,6 @@
 use clearscreen::clear;
 use dialoguer::Select;
-use regex::Regex;
-use std::io::stdin;
+use std::{collections::HashMap, io::stdin, sync::PoisonError};
 
 use anyhow::{anyhow, Context, Error, Result};
 
@@ -64,10 +63,30 @@ impl Game {
         }
     }
 
+    pub fn get_current_player(&self) -> Player {
+        if self.move_id % 2 == 0 {
+            Player::Black
+        } else {
+            Player::White
+        }
+    }
+
     /// This function looks at the current board and determines the best possible move it can make in that given state.
     /// In order to figure this out, it uses the negamax algorithm, which is a variant of the minimax algorithm.  
-    pub fn get_best_move(&self) -> Move {
-        todo!()
+    pub fn get_best_move(&self) -> Result<Move> {
+        let moves = self.generate_all_possible_moves()?;
+        Ok(*moves.first().unwrap())
+    }
+
+    pub fn generate_all_possible_moves(&self) -> Result<Vec<Move>> {
+        let moving_player = self.get_current_player();
+        let friendly_peices = self.board.get_idx_of_player_peices(moving_player);
+
+        Ok(friendly_peices
+            .iter()
+            .map(|peice| self.generate_moves_for_peice(*peice).unwrap())
+            .flatten()
+            .collect())
     }
 
     pub fn generate_moves_for_peice(&self, peice: Position) -> Result<Vec<Move>> {
@@ -86,14 +105,15 @@ impl Game {
                 } else {
                     -1
                 };
-                potential_moves.push(Move::new(
-                    peice.idx(),
-                    Position::from_coords(x + 1, (y as isize + y_offset) as usize).idx(),
-                ));
-                potential_moves.push(Move::new(
-                    peice.idx(),
-                    Position::from_coords(x - 1, (y as isize + y_offset) as usize).idx(),
-                ));
+                match Position::from_coords_checked(x as isize + 1, y as isize + y_offset) {
+                    Ok(pos) => potential_moves.push(Move::new(peice.idx(), pos.idx())),
+                    Err(_) => (),
+                };
+
+                match Position::from_coords_checked(x as isize - 1, y as isize + y_offset) {
+                    Ok(pos) => potential_moves.push(Move::new(peice.idx(), pos.idx())),
+                    Err(_) => (),
+                };
             }
             TileKind::King => {
                 let moves = KING_MOVES[peice.idx()].to_vec();
@@ -130,6 +150,7 @@ impl Game {
 
     pub fn run(&mut self) -> Result<Player> {
         loop {
+            let moving_player = self.get_current_player();
             match (
                 self.board.get_remaining_peices(Player::Black),
                 self.board.get_remaining_peices(Player::White),
@@ -149,12 +170,13 @@ impl Game {
 
             println!("{}", self.board);
             self.get_stats();
+            println!("Valid Moves:");
             let this_move = loop {
                 let this_move = match self.mode {
                     GameMode::HumanVsHuman => self.get_user_move(),
                     GameMode::HumanVsAi if self.move_id % 2 == 0 => self.get_user_move(),
-                    GameMode::HumanVsAi => Ok(self.get_best_move()),
-                    GameMode::AiVsAi => Ok(self.get_best_move()),
+                    GameMode::HumanVsAi => self.get_best_move(),
+                    GameMode::AiVsAi => self.get_best_move(),
                 };
                 if let Ok(m) = this_move {
                     break m;
@@ -163,8 +185,15 @@ impl Game {
                 }
             };
             self.moves.push(this_move);
+            let opp_count_before_move = self.board.get_remaining_peices(!moving_player);
             self.board.make_move(self.move_id, this_move)?;
-            self.move_id += 1;
+            let opp_count_after_move = self.board.get_remaining_peices(!moving_player);
+
+            self.move_id += if opp_count_after_move <= opp_count_before_move {
+                1
+            } else {
+                2
+            }
         }
     }
 
@@ -188,40 +217,13 @@ impl Game {
     }
 
     pub fn get_user_move(&self) -> Result<Move> {
-        println!(
-            "Moving player: {}",
-            if self.move_id % 2 == 0 {
-                "Black"
-            } else {
-                "White"
-            }
-        );
-        loop {
-            let from = Self::get_location("Enter the source tile for your move: xy")?;
-            let to = Self::get_location("Enter the destination tile for your move: xy")?;
-            let this_move = Move::new(from.idx(), to.idx());
-
-            if self.is_valid_move(this_move) {
-                break Ok(this_move);
-            } else {
-                println!("Invalid move selected, try again");
-            }
-        }
-    }
-
-    fn get_location(prompt: &str) -> Result<Position> {
-        let expected_pattern = Regex::new(r"(?m)[A-Ha-h][1-8]")?;
-        let mut buf = String::new();
-        let stdin = stdin();
-        loop {
-            buf.clear();
-            println!("{}", prompt);
-            stdin.read_line(&mut buf)?;
-
-            if let Ok(pos) = Position::from_str(buf.clone()) {
-                return Ok(pos);
-            }
-        }
+        println!("Moving player: {}", self.get_current_player());
+        let valid_moves = self.generate_all_possible_moves()?;
+        let selection = Select::new()
+            .with_prompt("Select a move (use arrow keys to make your selection)")
+            .items(&valid_moves)
+            .interact()?;
+        Ok(*valid_moves.get(selection).unwrap())
     }
 
     #[allow(clippy::clone_on_copy)]

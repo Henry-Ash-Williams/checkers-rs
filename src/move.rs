@@ -5,7 +5,7 @@ use crate::board::*;
 
 use std::fmt;
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Position(usize);
 
 impl Position {
@@ -40,6 +40,7 @@ impl Position {
         Self::from_idx_checked(idx)
     }
 
+    #[allow(clippy::unwrap_used)]
     pub fn from_str<S: Into<String>>(buffer: S) -> Result<Self> {
         let buffer: String = buffer.into();
         let expected_pattern = Regex::new(r"(?m)[A-Ha-h][1-8]")?;
@@ -83,7 +84,18 @@ impl fmt::Display for Position {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+impl fmt::Debug for Position {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let (x, y) = Board::idx_to_coords(self.0);
+
+        let x = (x as u8 + 97) as char;
+        let y = y + 1;
+
+        write!(f, "Position {{ {x}{y} }}")
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Move {
     from: Position,
     to: Position,

@@ -75,6 +75,30 @@ impl Board {
             .filter(|tile| tile.occupied_by == Some(player))
             .count()
     }
+    
+    pub(crate) fn evaluate_board(&self, moving_player: Player) -> isize {
+        let friendly_peices = self.get_idx_of_player_peices(moving_player);
+        let enemy_peices = self.get_idx_of_player_peices(!moving_player);
+        // let distance_to_promotion = todo!();
+        // Get number of peices where a capture is possible
+        let potential_captures = friendly_peices
+            .iter()
+            .filter(|idx| self.can_capture(moving_player, **idx))
+            .count();
+        let vulnerable_peices = enemy_peices
+            .iter()
+            .filter(|idx| self.can_capture(!moving_player, **idx))
+            .count();
+
+        potential_captures as isize - vulnerable_peices as isize
+    }
+
+    pub fn distance_to_position(source: Position, target: Position) -> f32 { 
+        let (sx , sy) = source.coords(); 
+        let (tx, ty) = target.coords(); 
+
+        (((tx - sx).pow(2) + (ty - sy).pow(2)) as f32).sqrt()
+    }
 
     /// Handle moving the king
     pub fn handle_king_movement(&mut self, moving_player: Player, this_move: Move) -> Result<()> {
@@ -105,7 +129,8 @@ impl Board {
         // Generate a list of indicies the king must move over to get to the target
         let moves: Vec<Position> = (min(sx, tx)..max(sx, tx))
             .zip(min(sy, ty)..max(sy, ty))
-            .map(|(x, y)| Position::from_coords(x, y))
+            .map(|(x, y)| Position::from_coords_checked(x as isize, y as isize))
+            .filter_map(|pos| pos.ok())
             .collect();
 
         // Check the move is not blocked by any friendly peices, make sure to ignore the moving tile
@@ -140,7 +165,8 @@ impl Board {
     pub fn has_player_won(&self, player: Player) -> bool {
         self.get_remaining_peices(!player) == 0
     }
-
+    
+    /// Get the indicies of all peices owned by a player 
     pub fn get_idx_of_player_peices(&self, player: Player) -> Vec<Position> {
         self.board
             .iter()
@@ -150,6 +176,7 @@ impl Board {
             .collect()
     }
 
+    /// Test if the player has a king 
     pub fn has_king(&self, player: Player) -> bool {
         self.board
             .iter()
@@ -212,10 +239,8 @@ impl Board {
             return Err(anyhow!("Cannot move the other players piece!"));
         }
 
-        // TODO: Needs a separate check for forcing king captures
         if self.can_capture(moving_player, this_move.from())
             && !self[this_move.to()].is_occupied_by(!moving_player)
-            && self[this_move.from()].kind() == TileKind::Normal
         {
             return Err(anyhow!("Capture available, try another move"));
         }
@@ -254,10 +279,10 @@ impl Board {
             if !moving_player == self[this_move.to()].get_owner()? {
                 // Handle taking an opponents peice by jumping over it
                 let to_coords = this_move.to().coords();
-                let next_tile = Position::from_coords(
-                    (to_coords.0 as isize + delta.0) as usize,
-                    (to_coords.1 as isize + delta.1) as usize,
-                );
+                let next_tile = Position::from_coords_checked(
+                    to_coords.0 as isize + delta.0,
+                    to_coords.1 as isize + delta.1,
+                )?;
 
                 if self[next_tile].is_empty() {
                     self[this_move.from()].leave();

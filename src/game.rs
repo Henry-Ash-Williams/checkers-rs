@@ -1,6 +1,9 @@
 use clearscreen::clear;
 use dialoguer::Select;
+use rand::Rng;
+use slab_tree::{Tree, TreeBuilder, self};
 use std::{collections::HashMap, io::stdin, sync::PoisonError};
+
 
 use anyhow::{anyhow, Context, Error, Result};
 
@@ -71,21 +74,50 @@ impl Game {
         }
     }
 
+    #[allow(clippy::clone_on_copy)]
     /// This function looks at the current board and determines the best possible move it can make in that given state.
     /// In order to figure this out, it uses the negamax algorithm, which is a variant of the minimax algorithm.  
     pub fn get_best_move(&self) -> Result<Move> {
-        let moves = self.generate_all_possible_moves()?;
-        Ok(*moves.first().unwrap())
+        let mut search_space = TreeBuilder::new().with_root((self.board, self.board.evaluate_board(self.get_current_player()))).build();
+        let moves = self.generate_all_possible_moves(self.board, self.get_current_player())?;
+        let move_evaluations: HashMap<Move, isize> = HashMap::from_iter(moves.iter().map(|potential_move| (*potential_move, self.evaluate_move(*potential_move).unwrap())));
+        let mut root = search_space.root_mut().unwrap();
+        move_evaluations.iter().for_each(|possible_move| {
+            let (possible_move, evaluation) = possible_move;
+            let mut board_cpy = self.board.clone(); 
+            board_cpy.make_move(self.move_id, *possible_move).unwrap();
+            root.append((board_cpy, *evaluation));
+        });
+
+        let mut rng = rand::thread_rng(); 
+        let best_move = move_evaluations
+            .iter()
+            .max_by(|me_lhs, me_rhs| me_lhs.1.cmp(me_rhs.1));
+
+        let best_move = match best_move {
+            Some(m) => *m.0, 
+            None => {
+                if moves.is_empty() {
+                    return Err(anyhow!("No moves remain!"));
+                }
+
+                let idx = rng.gen_range(0..moves.len());
+
+                *moves.get(idx).unwrap()
+            }
+        }; 
+
+        println!("AI chose move {best_move}"); 
+
+        Ok(best_move)
     }
 
-    pub fn generate_all_possible_moves(&self) -> Result<Vec<Move>> {
-        let moving_player = self.get_current_player();
-        let friendly_peices = self.board.get_idx_of_player_peices(moving_player);
+    pub fn generate_all_possible_moves(&self, board: Board, moving_player: Player) -> Result<Vec<Move>> {
+        let friendly_peices = board.get_idx_of_player_peices(moving_player);
 
         Ok(friendly_peices
             .iter()
-            .map(|peice| self.generate_moves_for_peice(*peice).unwrap())
-            .flatten()
+            .flat_map(|peice| self.generate_moves_for_peice(*peice).unwrap())
             .collect())
     }
 
@@ -105,19 +137,17 @@ impl Game {
                 } else {
                     -1
                 };
-                match Position::from_coords_checked(x as isize + 1, y as isize + y_offset) {
-                    Ok(pos) => potential_moves.push(Move::new(peice.idx(), pos.idx())),
-                    Err(_) => (),
-                };
 
-                match Position::from_coords_checked(x as isize - 1, y as isize + y_offset) {
-                    Ok(pos) => potential_moves.push(Move::new(peice.idx(), pos.idx())),
-                    Err(_) => (),
-                };
+                if let Ok(pos) = Position::from_coords_checked(x as isize + 1, y as isize + y_offset) {
+                    potential_moves.push(Move::new(peice.idx(), pos.idx()))
+                }
+
+                if let Ok(pos) =  Position::from_coords_checked(x as isize - 1, y as isize + y_offset) {
+                    potential_moves.push(Move::new(peice.idx(), pos.idx()))
+                }
             }
             TileKind::King => {
                 let moves = KING_MOVES[peice.idx()].to_vec();
-
                 for king_move in moves {
                     potential_moves.push(Move::new(peice.idx(), king_move));
                 }
@@ -131,25 +161,13 @@ impl Game {
             .collect())
     }
 
-    fn evaluate_board(&self, moving_player: Player) -> isize {
-        let friendly_peices = self.board.get_idx_of_player_peices(moving_player);
-        let enemy_peices = self.board.get_idx_of_player_peices(!moving_player);
-        // let distance_to_promotion = todo!();
-        // Get number of peices where a capture is possible
-        let potential_captures = friendly_peices
-            .iter()
-            .filter(|idx| self.board.can_capture(moving_player, **idx))
-            .count();
-        let vulnerable_peices = enemy_peices
-            .iter()
-            .filter(|idx| self.board.can_capture(!moving_player, **idx))
-            .count();
-
-        potential_captures as isize - vulnerable_peices as isize
-    }
 
     pub fn run(&mut self) -> Result<Player> {
         loop {
+            if self.move_id >= 2 * (12 * 12) {
+                println!("Too many moves");
+                break Err(anyhow!("Too many moves"));
+            }
             let moving_player = self.get_current_player();
             match (
                 self.board.get_remaining_peices(Player::Black),
@@ -170,7 +188,6 @@ impl Game {
 
             println!("{}", self.board);
             self.get_stats();
-            println!("Valid Moves:");
             let this_move = loop {
                 let this_move = match self.mode {
                     GameMode::HumanVsHuman => self.get_user_move(),
@@ -178,11 +195,11 @@ impl Game {
                     GameMode::HumanVsAi => self.get_best_move(),
                     GameMode::AiVsAi => self.get_best_move(),
                 };
+
                 if let Ok(m) = this_move {
                     break m;
-                } else {
-                    println!("{this_move:?}");
-                }
+                } 
+
             };
             self.moves.push(this_move);
             let opp_count_before_move = self.board.get_remaining_peices(!moving_player);
@@ -218,7 +235,7 @@ impl Game {
 
     pub fn get_user_move(&self) -> Result<Move> {
         println!("Moving player: {}", self.get_current_player());
-        let valid_moves = self.generate_all_possible_moves()?;
+        let valid_moves = self.generate_all_possible_moves(self.board, self.get_current_player())?;
         let selection = Select::new()
             .with_prompt("Select a move (use arrow keys to make your selection)")
             .items(&valid_moves)
@@ -233,4 +250,15 @@ impl Game {
         let mut board_cpy = self.board.clone();
         board_cpy.make_move(self.move_id, this_move).is_ok()
     }
+
+
+    #[allow(clippy::clone_on_copy)]
+    // See Game::is_valid move for explaination of why I'm disabling the lint 
+    fn evaluate_move(&self, this_move: Move) -> Result<isize> {
+        let mut board_cpy = self.board.clone(); 
+        board_cpy.make_move(self.move_id, this_move)?;
+        Ok(board_cpy.evaluate_board(!self.get_current_player()))
+    }
+
+
 }
